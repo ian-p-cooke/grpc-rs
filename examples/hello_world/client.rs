@@ -21,18 +21,45 @@ mod log_util;
 
 use std::sync::Arc;
 
-use grpcio::{ChannelBuilder, EnvBuilder};
+use grpcio::{ChannelCredentialsBuilder, ChannelBuilder, EnvBuilder};
 use grpcio_proto::example::helloworld::HelloRequest;
 use grpcio_proto::example::helloworld_grpc::GreeterClient;
 
-fn main() {
+use std::path::Path;
+use std::fs::File;
+use std::io::Read;
+
+fn read_path_to_end<P: AsRef<Path>>(
+    path: P,
+    mut buf: &mut Vec<u8>,
+) -> Result<usize, std::io::Error> {
+    let mut f = File::open(path)?;
+    f.read_to_end(&mut buf)
+}
+
+fn main() -> Result<(), Box<std::error::Error>> {
     let _guard = log_util::init_log(None);
     let env = Arc::new(EnvBuilder::new().build());
-    let ch = ChannelBuilder::new(env).connect("localhost:50051");
+
+    let mut root_cert = Vec::with_capacity(8096);
+    let mut client_cert = Vec::with_capacity(8096);
+    let mut client_key = Vec::with_capacity(8096);
+
+    read_path_to_end("ca.cert", &mut root_cert)?;
+    read_path_to_end("client.fullchain", &mut client_cert)?;
+    read_path_to_end("client.key", &mut client_key)?;
+
+    let creds = ChannelCredentialsBuilder::new()
+        .root_cert(root_cert)
+        .cert(client_cert, client_key)
+        .build();
+    let ch = ChannelBuilder::new(env).secure_connect("localhost:50051", creds);
     let client = GreeterClient::new(ch);
 
     let mut req = HelloRequest::new();
     req.set_name("world".to_owned());
     let reply = client.say_hello(&req).expect("rpc");
     info!("Greeter received: {}", reply.get_message());
+
+    Ok(())
 }

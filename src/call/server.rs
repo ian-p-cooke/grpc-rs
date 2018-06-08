@@ -11,12 +11,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::{result, slice};
+use std::{self, result, slice};
 use std::sync::Arc;
 use std::ffi::CStr;
 
 use futures::{Async, AsyncSink, Future, Poll, Sink, StartSend, Stream};
-use grpc_sys::{self, GprClockType, GprTimespec, GrpcCallStatus, GrpcRequestCallContext};
+use grpc_sys::{self, GprClockType, GprTimespec, GrpcCallStatus, GrpcRequestCallContext, GrpcAuthContext, GrpcAuthPropertyIterator, GrpcAuthProperty};
 
 use async::{BatchFuture, CallTag, Executor, SpinLock};
 use call::{BatchContext, Call, MethodType, RpcStatusCode, SinkBase, StreamingBase};
@@ -46,6 +46,83 @@ impl Deadline {
             let now = grpc_sys::gpr_now(GprClockType::Realtime);
             grpc_sys::gpr_time_cmp(now, self.spec) >= 0
         }
+    }
+}
+
+pub struct AuthProperty {
+    prop: *const GrpcAuthProperty,
+}
+
+impl AuthProperty {
+    pub fn name(&self) -> String {
+        "name".to_owned()
+    }
+
+    pub fn value(&self) -> String {
+        "value".to_owned()
+    }
+}
+
+pub struct AuthPropertyIter {
+    iter: *mut GrpcAuthPropertyIterator,
+}
+
+impl Iterator for AuthPropertyIter {
+    type Item = AuthProperty;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        //grpc_auth_property_iterator_next returns empty_iterator when self.iter is NULL
+        println!("iter: {:?}",self.iter);
+        let prop = unsafe { grpc_sys::grpc_auth_property_iterator_next(self.iter) };
+        if prop.is_null() {
+            None
+        } else {
+            Some(AuthProperty { prop: prop })
+        }
+    }
+}
+
+pub struct AuthContext {
+    ctx: *mut GrpcAuthContext,
+}
+
+impl AuthContext {
+
+    pub fn peer_identity_property_name(&self) -> String {
+        assert!(!self.ctx.is_null());
+        unsafe { 
+            let p = grpc_sys::grpc_auth_context_peer_identity_property_name(self.ctx);
+            let property_name = CStr::from_ptr(p)
+                .to_str()
+                .expect("valid UTF-8 data")
+                .to_owned();
+            grpc_sys::gpr_free(p as _);
+            property_name
+        }
+    }
+
+    pub fn peer_is_authenticated(&self) -> bool {
+        if self.ctx.is_null() {
+            false
+        } else {
+            unsafe { grpc_sys::grpc_auth_context_peer_is_authenticated(self.ctx) != 0 }
+        }
+    }
+
+    pub fn peer_identity(&self) -> AuthPropertyIter {
+        assert!(!self.ctx.is_null());
+        unsafe { 
+            println!("self.ctx: {:?}", self.ctx);
+            //grpc_auth_context_peer_identity returns empty_iterator when self.ctx is NULL
+            let iter = grpc_sys::grpc_auth_context_peer_identity(self.ctx);
+            AuthPropertyIter { iter: iter }
+        }
+    }
+}
+
+impl Drop for AuthContext {
+    fn drop(&mut self) {
+        unsafe { grpc_sys::grpc_auth_context_release(self.ctx) }
     }
 }
 
@@ -167,6 +244,14 @@ impl RequestContext {
             peer
         }
     }
+
+    pub fn auth_context(&self) -> AuthContext {
+        unsafe {
+            let call = grpc_sys::grpcwrap_request_call_context_get_call(self.ctx);
+            let ctx = grpc_sys::grpc_call_auth_context(call);
+            AuthContext { ctx: ctx }
+        }
+    }
 }
 
 impl Drop for RequestContext {
@@ -255,7 +340,7 @@ impl<T> Stream for RequestStream<T> {
 // Not using generic here because we don't need to expose
 // `CallHolder` or `Call` to caller.
 macro_rules! impl_unary_sink {
-    ($t:ident, $rt:ident, $holder:ty) => (
+    ($t:ident, $rt:ident, $holder:ty) => {
         pub struct $rt {
             call: $holder,
             cq_f: Option<BatchFuture>,
@@ -312,7 +397,8 @@ macro_rules! impl_unary_sink {
 
                 let write_flags = self.write_flags;
                 let res = self.call.call(|c| {
-                    c.call.start_send_status_from_server(&status, true, data, write_flags)
+                    c.call
+                        .start_send_status_from_server(&status, true, data, write_flags)
                 });
 
                 let (cq_f, err) = match res {
@@ -327,7 +413,7 @@ macro_rules! impl_unary_sink {
                 }
             }
         }
-    );
+    };
 }
 
 impl_unary_sink!(UnarySink, UnarySinkResult, ShareCall);
@@ -339,7 +425,7 @@ impl_unary_sink!(
 
 // A macro helper to implement server side streaming sink.
 macro_rules! impl_stream_sink {
-    ($t:ident, $ft:ident, $holder:ty) => (
+    ($t:ident, $ft:ident, $holder:ty) => {
         pub struct $t<T> {
             call: $holder,
             base: SinkBase,
@@ -370,7 +456,8 @@ macro_rules! impl_stream_sink {
                 assert!(self.flush_f.is_none());
                 let send_metadata = self.base.send_metadata;
                 let res = self.call.call(|c| {
-                    c.call.start_send_status_from_server(&status, send_metadata, None, 0)
+                    c.call
+                        .start_send_status_from_server(&status, send_metadata, None, 0)
                 });
 
                 let (fail_f, err) = match res {
@@ -396,11 +483,13 @@ macro_rules! impl_stream_sink {
                 }
                 self.base
                     .start_send(&mut self.call, &item.0, item.1, self.ser)
-                    .map(|s| if s {
+                    .map(|s| {
+                        if s {
                             AsyncSink::Ready
                         } else {
                             AsyncSink::NotReady(item)
-                        })
+                        }
+                    })
             }
 
             fn poll_complete(&mut self) -> Poll<(), Error> {
@@ -414,7 +503,8 @@ macro_rules! impl_stream_sink {
                     let send_metadata = self.base.send_metadata;
                     let status = &self.status;
                     let flush_f = self.call.call(|c| {
-                        c.call.start_send_status_from_server(status, send_metadata, None, 0)
+                        c.call
+                            .start_send_status_from_server(status, send_metadata, None, 0)
                     })?;
                     self.flush_f = Some(flush_f);
                 }
@@ -460,7 +550,7 @@ macro_rules! impl_stream_sink {
                 Ok(readiness)
             }
         }
-    )
+    };
 }
 
 impl_stream_sink!(ServerStreamingSink, ServerStreamingSinkFailure, ShareCall);
@@ -507,6 +597,10 @@ impl<'a> RpcContext<'a> {
         self.ctx.peer()
     }
 
+    pub fn auth_context(&self) -> AuthContext {
+        self.ctx.auth_context()
+    }
+
     /// Spawn the future into current grpc poll thread.
     ///
     /// This can reduce a lot of context switching, but please make
@@ -528,7 +622,7 @@ macro_rules! accept_call {
             Err(e) => panic!("unexpected error when trying to accept request: {:?}", e),
             Ok(f) => f,
         }
-    }
+    };
 }
 
 // Helper function to call a unary handler.
