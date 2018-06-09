@@ -53,8 +53,8 @@ impl Greeter for GreeterService {
         let auth_context = ctx.auth_context();
         let authenticated = auth_context.peer_is_authenticated();
         println!("authenticated: {}", authenticated);
-        //let property_name = auth_context.peer_identity_property_name();
-        //println!("peer_identity_property_name: {}", property_name);
+        let property_name = auth_context.peer_identity_property_name();
+        println!("peer_identity_property_name: {}", property_name);
         let peer_identity = auth_context.peer_identity();
         let mut count = 0;
         let mut name = "no name".to_owned();

@@ -194,6 +194,13 @@ pub struct GrpcAuthProperty {
     pub value_length: size_t,
 }
 
+#[repr(C)]
+pub struct GrpcAuthPropertyIterator {
+    pub ctx: *const GrpcAuthContext,
+    pub index: size_t,
+    pub name: *const c_char,
+}
+
 pub const GRPC_INITIAL_METADATA_IDEMPOTENT_REQUEST: uint32_t = 0x00000010;
 pub const GRPC_INITIAL_METADATA_WAIT_FOR_READY: uint32_t = 0x00000020;
 pub const GRPC_INITIAL_METADATA_CACHEABLE_REQUEST: uint32_t = 0x00000040;
@@ -208,7 +215,6 @@ pub enum GrpcCompletionQueue {}
 pub enum GrpcChannel {}
 pub enum GrpcCall {}
 pub enum GrpcAuthContext {}
-pub enum GrpcAuthPropertyIterator {}
 pub enum GrpcByteBuffer {}
 pub enum GrpcBatchContext {}
 pub enum GrpcServer {}
@@ -413,7 +419,7 @@ extern "C" {
     pub fn grpc_auth_context_release(auth_context: *mut GrpcAuthContext);
     pub fn grpc_auth_context_peer_is_authenticated(auth_context: *const GrpcAuthContext) -> c_int;
     pub fn grpc_auth_context_peer_identity_property_name(auth_context: *const GrpcAuthContext) -> *const c_char;
-    pub fn grpc_auth_context_peer_identity(auth_context: *const GrpcAuthContext) -> *mut GrpcAuthPropertyIterator;
+    pub fn grpc_auth_context_peer_identity(auth_context: *const GrpcAuthContext) -> GrpcAuthPropertyIterator;
     pub fn grpc_auth_property_iterator_next(it: *mut GrpcAuthPropertyIterator) -> *const GrpcAuthProperty;
 
     pub fn grpc_server_register_method(

@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::{self, result, slice};
+use std::{result, slice};
 use std::sync::Arc;
 use std::ffi::CStr;
 
@@ -55,16 +55,26 @@ pub struct AuthProperty {
 
 impl AuthProperty {
     pub fn name(&self) -> String {
-        "name".to_owned()
+        unsafe {
+            CStr::from_ptr((*self.prop).name)
+                .to_str()
+                .expect("valid UTF-8 data")
+                .to_owned()
+        }
     }
 
     pub fn value(&self) -> String {
-        "value".to_owned()
+        unsafe {
+            CStr::from_ptr((*self.prop).value)
+                .to_str()
+                .expect("valid UTF-8 data")
+                .to_owned()
+        }
     }
 }
 
 pub struct AuthPropertyIter {
-    iter: *mut GrpcAuthPropertyIterator,
+    iter: GrpcAuthPropertyIterator,
 }
 
 impl Iterator for AuthPropertyIter {
@@ -72,8 +82,7 @@ impl Iterator for AuthPropertyIter {
 
     fn next(&mut self) -> Option<Self::Item> {
         //grpc_auth_property_iterator_next returns empty_iterator when self.iter is NULL
-        println!("iter: {:?}",self.iter);
-        let prop = unsafe { grpc_sys::grpc_auth_property_iterator_next(self.iter) };
+        let prop = unsafe { grpc_sys::grpc_auth_property_iterator_next(&mut self.iter as *mut GrpcAuthPropertyIterator) };
         if prop.is_null() {
             None
         } else {
