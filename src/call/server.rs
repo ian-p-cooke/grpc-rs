@@ -14,6 +14,7 @@
 use std::{result, slice};
 use std::sync::Arc;
 use std::ffi::CStr;
+use std::marker::PhantomData;
 
 use futures::{Async, AsyncSink, Future, Poll, Sink, StartSend, Stream};
 use grpc_sys::{self, GprClockType, GprTimespec, GrpcCallStatus, GrpcRequestCallContext, GrpcAuthContext, GrpcAuthPropertyIterator, GrpcAuthProperty};
@@ -49,36 +50,36 @@ impl Deadline {
     }
 }
 
-pub struct AuthProperty {
+pub struct AuthProperty<'a> {
     prop: *const GrpcAuthProperty,
+    _lifetime: PhantomData<&'a GrpcAuthProperty>,
 }
 
-impl AuthProperty {
-    pub fn name(&self) -> String {
+impl <'a> AuthProperty<'a> {
+    pub fn name(&self) -> &str {
         unsafe {
             CStr::from_ptr((*self.prop).name)
                 .to_str()
                 .expect("valid UTF-8 data")
-                .to_owned()
         }
     }
 
-    pub fn value(&self) -> String {
+    pub fn value(&self) -> &str {
         unsafe {
             CStr::from_ptr((*self.prop).value)
                 .to_str()
                 .expect("valid UTF-8 data")
-                .to_owned()
         }
     }
 }
 
-pub struct AuthPropertyIter {
+pub struct AuthPropertyIter<'a> {
     iter: GrpcAuthPropertyIterator,
+    _lifetime: PhantomData<&'a GrpcAuthPropertyIterator>,
 }
 
-impl Iterator for AuthPropertyIter {
-    type Item = AuthProperty;
+impl <'a> Iterator for AuthPropertyIter<'a> {
+    type Item = AuthProperty<'a>;
 
     fn next(&mut self) -> Option<Self::Item> {
         //grpc_auth_property_iterator_next returns empty_iterator when self.iter is NULL
@@ -86,27 +87,25 @@ impl Iterator for AuthPropertyIter {
         if prop.is_null() {
             None
         } else {
-            Some(AuthProperty { prop: prop })
+            Some(AuthProperty { prop: prop, _lifetime: PhantomData })
         }
     }
 }
 
-pub struct AuthContext {
+pub struct AuthContext<'a> {
     ctx: *mut GrpcAuthContext,
+    _lifetime: PhantomData<&'a GrpcAuthContext>,
 }
 
-impl AuthContext {
+impl <'a> AuthContext<'a> {
 
-    pub fn peer_identity_property_name(&self) -> String {
+    pub fn peer_identity_property_name(&self) -> &str {
         assert!(!self.ctx.is_null());
         unsafe { 
             let p = grpc_sys::grpc_auth_context_peer_identity_property_name(self.ctx);
-            let property_name = CStr::from_ptr(p)
+            CStr::from_ptr(p)
                 .to_str()
                 .expect("valid UTF-8 data")
-                .to_owned();
-            grpc_sys::gpr_free(p as _);
-            property_name
         }
     }
 
@@ -119,17 +118,15 @@ impl AuthContext {
     }
 
     pub fn peer_identity(&self) -> AuthPropertyIter {
-        assert!(!self.ctx.is_null());
         unsafe { 
-            println!("self.ctx: {:?}", self.ctx);
             //grpc_auth_context_peer_identity returns empty_iterator when self.ctx is NULL
             let iter = grpc_sys::grpc_auth_context_peer_identity(self.ctx);
-            AuthPropertyIter { iter: iter }
+            AuthPropertyIter { iter: iter, _lifetime: PhantomData }
         }
     }
 }
 
-impl Drop for AuthContext {
+impl <'a> Drop for AuthContext<'a> {
     fn drop(&mut self) {
         unsafe { grpc_sys::grpc_auth_context_release(self.ctx) }
     }
@@ -258,7 +255,7 @@ impl RequestContext {
         unsafe {
             let call = grpc_sys::grpcwrap_request_call_context_get_call(self.ctx);
             let ctx = grpc_sys::grpc_call_auth_context(call);
-            AuthContext { ctx: ctx }
+            AuthContext { ctx: ctx, _lifetime: PhantomData }
         }
     }
 }

@@ -30,7 +30,6 @@ use std::{io, thread};
 use futures::Future;
 use futures::sync::oneshot;
 use grpcio::{Environment, RpcContext, ServerBuilder, UnarySink, ServerCredentialsBuilder};
-
 use grpcio_proto::example::helloworld::{HelloReply, HelloRequest};
 use grpcio_proto::example::helloworld_grpc::{self, Greeter};
 
@@ -50,27 +49,21 @@ struct GreeterService;
 
 impl Greeter for GreeterService {
     fn say_hello(&self, ctx: RpcContext, req: HelloRequest, sink: UnarySink<HelloReply>) {
-        let auth_context = ctx.auth_context();
+        let auth_context = ctx.auth_context();        
         let authenticated = auth_context.peer_is_authenticated();
         println!("authenticated: {}", authenticated);
         let property_name = auth_context.peer_identity_property_name();
         println!("peer_identity_property_name: {}", property_name);
         let peer_identity = auth_context.peer_identity();
-        let mut count = 0;
-        let mut name = "no name".to_owned();
-        let mut value = "no value".to_owned();
+
         for prop in peer_identity {
-            name = prop.name();
-            value = prop.value();
+            let name = prop.name();
+            let value = prop.value();
             println!("{} = {}", name, value);
-            count += 1;
         }
         let msg = format!(
-            "Hello {}! props: {}, last {{ name: {}, value: {} }}.",
+            "Hello {}!",
             req.get_name(),
-            count,
-            name, 
-            value
         );
         let mut resp = HelloReply::new();
         resp.set_message(msg);

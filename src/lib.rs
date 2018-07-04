@@ -45,7 +45,7 @@ pub use call::client::{CallOption, ClientCStreamReceiver, ClientCStreamSender,
                        ClientUnaryReceiver, StreamingCallSink};
 pub use call::server::{ClientStreamingSink, ClientStreamingSinkResult, Deadline, DuplexSink,
                        DuplexSinkFailure, RequestStream, RpcContext, ServerStreamingSink,
-                       ServerStreamingSinkFailure, UnarySink, UnarySinkResult};
+                       ServerStreamingSinkFailure, UnarySink, UnarySinkResult, AuthProperty, AuthPropertyIter, AuthContext};
 pub use channel::{Channel, ChannelBuilder, CompressionAlgorithms, CompressionLevel};
 pub use client::Client;
 pub use codec::Marshaller;
